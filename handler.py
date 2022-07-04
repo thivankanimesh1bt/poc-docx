@@ -1,4 +1,5 @@
 import json
+from pydoc import doc
 
 from docx import Document
 from pptx.util import Inches
@@ -10,6 +11,9 @@ import boto3
 from botocore.exceptions import ClientError
 import logging
 from io import BytesIO
+
+import asyncio
+from docxcompose.composer import Composer
 
 def replace_text_in_paragraph(paragraph, key, value):
     if key in paragraph.text:
@@ -112,9 +116,17 @@ def update_table(replacements, document):
     table.style = 'Table Grid'
     add_data_to_table(table_2)
 
+async def process(doc, dataDump):
+    replace_txt(dataDump["text_replaces"], doc)
+    update_table(dataDump["table_replaces"]["cashFlows"], doc)
+    return doc
 
-def docxGenerate(event, context):
-    doc = Document('input.docx')
+async def run():
+    doc1 = Document('input.docx')
+    doc2 = Document('input.docx')
+    doc3 = Document('input.docx')
+    doc4 = Document('input.docx')
+
     dataDump = {
         "text_replaces":  {
             '{{var1}}': "Example Name",
@@ -770,26 +782,35 @@ def docxGenerate(event, context):
              
     }
 
-    response = {
-        "statusCode": 200,
-        "body": "Success"
-    }
+    newDocs = await asyncio.gather(process(doc1, dataDump), process(doc2, dataDump), process(doc3, dataDump), process(doc4, dataDump)) 
 
-    replace_txt(dataDump["text_replaces"], doc)
-    update_table(dataDump["table_replaces"]["cashFlows"], doc)
-    # doc.save('output.docx')
+    # combine docx
+    combine = Document()
+    composer = Composer(combine)
+    composer.append(newDocs[0])
+    composer.append(newDocs[1])
+    composer.append(newDocs[2])
+    composer.append(newDocs[3])
 
     # upload to s3
     s3_client = boto3.client('s3')
 
     try:
         with BytesIO() as fileobj:
-            doc.save(fileobj)
+            composer.save(fileobj)
             fileobj.seek(0)
             res = s3_client.upload_fileobj(fileobj, 'poc-docx', 'output.docx')
     except ClientError as e:
         logging.error(e)
         return False
+
+def docxGenerate(event, context):
+    asyncio.run(run())
+
+    response = {
+        "statusCode": 200,
+        "body": "Success"
+    }
 
     return response
 
