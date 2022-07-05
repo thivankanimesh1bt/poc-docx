@@ -12,15 +12,36 @@ provider:
             - s3:PutObject
             - s3:GetObject
           Resource: '*'
+        - Effect: Allow
+          Action:
+            - sqs:DeleteMessage
+            - sqs:ReceiveMessage
+            - sqs:SendMessage
+          Resource: '*'
 
 functions:
   docxGenerate:
-    handler: handler.docxGenerate
+    handler: docxMultithreadingHandler.docxGenerate
+    timeout: 900
     events:
       - http:
           cors: true
           method: post
           path: /poc/docx-poc/generate
+
+  trigger:
+    handler: docxMultithreadingHandler.trigger
+    # reservedConcurrency: 10
+    timeout: 850
+    memorySize: 10240
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - PocQueue
+              - Arn
+          batchSize: 1
+
 plugins:
   - serverless-python-requirements
 
@@ -40,3 +61,14 @@ resources:
           ServerSideEncryptionConfiguration:
             - ServerSideEncryptionByDefault:
                 SSEAlgorithm: AES256
+
+    PocQueue:
+      Type: 'AWS::SQS::Queue'
+      Properties:
+        QueueName: poc-queue.fifo
+        VisibilityTimeout: 850
+        FifoQueue: true
+        MessageRetentionPeriod: 7200
+        ReceiveMessageWaitTimeSeconds: 20
+        ContentBasedDeduplication: true
+        # KmsMasterKeyId: alias/aws/sqs
